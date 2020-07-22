@@ -1,6 +1,6 @@
 //! # Role-based Access Control (RBAC) Pallet
 //!
-//! The RBAC Pallet implements role-based access control and permissions for Substrate extrisic calls.
+//! The RBAC Pallet implements role-based access control and permissions for Substrate extrinsic calls.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
