@@ -51,7 +51,9 @@ pub type SignedExtra = (
 * Add a genesis configuration for the module in the `src/chain_spec.rs` file.
 
 ```rust
-   
+rbac: Some(RBACConfig {
+	super_admins: vec![get_account_id_from_seed::<sr25519::Public>("Alice")]
+})
 ```
 
 * `cargo build --release` and then `cargo run --release -- --dev`

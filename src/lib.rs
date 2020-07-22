@@ -31,14 +31,13 @@ pub trait Trait: system::Trait {
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode)]
 pub enum Permission {
-    NotAllowed = 0,
     Execute = 1,
     Manage = 2
 }
 
 impl Default for Permission {
 	fn default() -> Self {
-        Permission::NotAllowed
+        Permission::Execute
     }
 }
 
@@ -94,6 +93,7 @@ decl_module! {
             let who = ensure_signed(origin)?;
 
             if Self::verify_manage_access(who, role.pallet.clone()) {
+                Self::deposit_event(RawEvent::AccessGranted(account_id.clone(), role.pallet.clone()));
                 <Permissions<T>>::insert((account_id, role), ());
             } else {
                 return Err(Error::<T>::AccessDenied.into())
@@ -107,6 +107,7 @@ decl_module! {
             let who = ensure_signed(origin)?;
 
             if Self::verify_manage_access(who, role.pallet.clone()) {
+                Self::deposit_event(RawEvent::AccessRevoked(account_id.clone(), role.pallet.clone()));
                 <Permissions<T>>::remove((account_id, role));
             } else {
                 return Err(Error::<T>::AccessDenied.into())
@@ -134,8 +135,8 @@ decl_event!(
     where
         AccountId = <T as system::Trait>::AccountId,
     {
-        AccessDenied(AccountId),
-        AccessGranted(AccountId),
+        AccessRevoked(AccountId, Vec<u8>),
+        AccessGranted(AccountId, Vec<u8>),
         SuperAdminAdded(AccountId),
     }
 );
@@ -213,8 +214,6 @@ impl<T: Trait + Send + Sync> SignedExtension for Authorize<T> where
 		_len: usize,
     ) -> TransactionValidity {
         let md = call.get_call_metadata();
-        print(md.pallet_name);
-        print(md.function_name);
 
         if <SuperAdmins<T>>::contains_key(who.clone()) {
             print("Access Granted!");
