@@ -1,6 +1,6 @@
 # Substrate Role-based Access Control Pallet
 
-A [Substrate](https://github.com/paritytech/substrate) pallet implementing role-based access control and permissions for Substrate extrisic calls.
+A [Substrate](https://github.com/paritytech/substrate) pallet implementing role-based access control and permissions for Substrate extrinsic calls.
 
 The filtering of incoming extrinsics and their sender accounts is done at the transaction queue validation layer, using the `SignedExtension` trait.
 
