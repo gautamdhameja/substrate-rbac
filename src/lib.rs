@@ -12,7 +12,7 @@ use frame_support::{
     decl_event, decl_storage, decl_module, decl_error,
     dispatch,
     weights::DispatchInfo,
-    traits::GetCallMetadata
+    traits::{GetCallMetadata, EnsureOrigin}
 };
 use system::{self as system, ensure_root, ensure_signed};
 use sp_runtime::{
@@ -26,7 +26,8 @@ use sp_runtime::{
 };
 
 pub trait Trait: system::Trait {
-    type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;    
+    type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+    type EnsureOrgOrigin: EnsureOrigin<Self::Origin>;
 }
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode)]
@@ -51,7 +52,7 @@ decl_storage! {
     trait Store for Module<T: Trait> as RBAC {
         pub SuperAdmins get(fn super_admins): map hasher(blake2_128_concat) T::AccountId => ();
         pub Permissions get(fn permissions): map hasher(blake2_128_concat) (T::AccountId, Role) => ();
-        pub Roles get(fn roles): map hasher(blake2_128_concat) Role => ();
+        pub Roles get(fn roles): Vec<Role>;
     }
     add_extra_genesis {
 		config(super_admins): Vec<T::AccountId>;
@@ -74,8 +75,10 @@ decl_module! {
         type Error = Error<T>;
         fn deposit_event() = default;
 
-        #[weight = 0]
+        #[weight = 10_000]
         pub fn create_role(origin, pallet_name: Vec<u8>, permission: Permission) -> dispatch::DispatchResult {
+            // T::EnsureOrgOrigin::ensure_origin(origin)?;
+
             ensure_signed(origin)?;
 
             let role = Role {
@@ -83,12 +86,14 @@ decl_module! {
                 permission: Permission::Execute
             };
 
-            Roles::insert(role, ());
+            let mut roles = Self::roles();
+            roles.push(role);
+            Roles::put(roles);
             
             Ok(())
         }
         
-        #[weight = 0]
+        #[weight = 10_000]
         pub fn assign_role(origin, account_id: T::AccountId, role: Role) -> dispatch::DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -102,7 +107,7 @@ decl_module! {
             Ok(())
         }
 
-        #[weight = 0]
+        #[weight = 10_000]
         pub fn revoke_access(origin, account_id: T::AccountId, role: Role) -> dispatch::DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -120,7 +125,7 @@ decl_module! {
         /// Super Admins have access to execute and manage all pallets.
         /// 
         /// Only _root_ can add a Super Admin.
-        #[weight = 0]
+        #[weight = 10_000]
         pub fn add_super_admin(origin, account_id: T::AccountId) -> dispatch::DispatchResult {
             ensure_root(origin)?;
             <SuperAdmins<T>>::insert(&account_id, ());
@@ -149,7 +154,9 @@ impl<T: Trait> Module<T> {
             permission: Permission::Execute
         };
 
-        if Roles::contains_key(&role) && <Permissions<T>>::contains_key((account_id, role)) {
+        let roles = Self::roles();
+
+        if roles.contains(&role) && <Permissions<T>>::contains_key((account_id, role)) {
             return true;
         }
 
@@ -162,7 +169,9 @@ impl<T: Trait> Module<T> {
             permission: Permission::Manage
         };
 
-        if Roles::contains_key(&role) && <Permissions<T>>::contains_key((account_id, role)) {
+        let roles = Self::roles();
+
+        if roles.contains(&role) && <Permissions<T>>::contains_key((account_id, role)) {
             return true;
         }
 
