@@ -84,7 +84,7 @@ decl_module! {
 
             let role = Role {
                 pallet: pallet_name,
-                permission
+                permission: Permission::Manage
             };
 
             let mut roles = Self::roles();
