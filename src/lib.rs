@@ -150,15 +150,24 @@ decl_event!(
 
 
 impl<T: Trait> Module<T> {
-    pub fn verify_execute_access(account_id: T::AccountId, pallet: Vec<u8>) -> bool {
-        let role = Role {
-            pallet,
+    pub fn verify_access(account_id: T::AccountId, pallet: Vec<u8>) -> bool {
+        let execute_role = Role {
+            pallet: pallet.clone(),
             permission: Permission::Execute
+        };
+
+        let manage_role = Role {
+            pallet,
+            permission: Permission::Manage
         };
 
         let roles = Self::roles();
 
-        if roles.contains(&role) && <Permissions<T>>::contains_key((account_id, role)) {
+        if roles.contains(&manage_role) && <Permissions<T>>::contains_key((account_id.clone(), manage_role)) {
+            return true;
+        } 
+        
+        if roles.contains(&execute_role) && <Permissions<T>>::contains_key((account_id, execute_role)) {
             return true;
         }
 
@@ -234,7 +243,7 @@ impl<T: Trait + Send + Sync> SignedExtension for Authorize<T> where
                 propagate: true,
                 ..Default::default()
             })
-        } else if <Module<T>>::verify_execute_access(who.clone(), md.pallet_name.as_bytes().to_vec()) {
+        } else if <Module<T>>::verify_access(who.clone(), md.pallet_name.as_bytes().to_vec()) {
             print("Access Granted!");
             Ok(ValidTransaction {
                 priority: info.weight as TransactionPriority,
