@@ -4,7 +4,7 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use sp_std::prelude::*;
+use sp_std::{prelude::*};
 use codec::{Decode, Encode};
 use sp_std::marker::PhantomData;
 use sp_std::fmt::Debug;
@@ -27,13 +27,13 @@ use sp_runtime::{
 
 pub trait Trait: system::Trait {
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
-    type EnsureOrgOrigin: EnsureOrigin<Self::Origin>;
+    type CreateRoleOrigin: EnsureOrigin<Self::Origin>;
 }
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode)]
 pub enum Permission {
-    Execute = 1,
-    Manage = 2
+    Execute,
+    Manage
 }
 
 impl Default for Permission {
@@ -77,19 +77,21 @@ decl_module! {
 
         #[weight = 10_000]
         pub fn create_role(origin, pallet_name: Vec<u8>, permission: Permission) -> dispatch::DispatchResult {
-            // T::EnsureOrgOrigin::ensure_origin(origin)?;
+            T::CreateRoleOrigin::ensure_origin(origin.clone())?;
 
-            ensure_signed(origin)?;
+            // TODO: This should be removed and the AccountId should be extracted from the above.
+            let who = ensure_signed(origin)?; 
 
             let role = Role {
                 pallet: pallet_name,
-                permission: Permission::Execute
+                permission
             };
 
             let mut roles = Self::roles();
-            roles.push(role);
+            roles.push(role.clone());
             Roles::put(roles);
             
+            <Permissions<T>>::insert((who, role), ());
             Ok(())
         }
         
@@ -97,7 +99,7 @@ decl_module! {
         pub fn assign_role(origin, account_id: T::AccountId, role: Role) -> dispatch::DispatchResult {
             let who = ensure_signed(origin)?;
 
-            if Self::verify_manage_access(who, role.pallet.clone()) {
+            if Self::verify_manage_access(who.clone(), role.pallet.clone()) {
                 Self::deposit_event(RawEvent::AccessGranted(account_id.clone(), role.pallet.clone()));
                 <Permissions<T>>::insert((account_id, role), ());
             } else {
