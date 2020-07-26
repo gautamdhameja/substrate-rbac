@@ -48,17 +48,28 @@ pub struct Role {
     permission: Permission
 }
 
+decl_event!(
+    pub enum Event<T>
+    where
+        AccountId = <T as system::Trait>::AccountId,
+    {
+        AccessRevoked(AccountId, Vec<u8>),
+        AccessGranted(AccountId, Vec<u8>),
+        SuperAdminAdded(AccountId),
+    }
+);
+
 decl_storage! {
     trait Store for Module<T: Trait> as RBAC {
-        pub SuperAdmins get(fn super_admins): map hasher(blake2_128_concat) T::AccountId => ();
-        pub Permissions get(fn permissions): map hasher(blake2_128_concat) (T::AccountId, Role) => ();
+        pub SuperAdmins get(fn super_admins): map hasher(blake2_128_concat) T::AccountId => bool;
+        pub Permissions get(fn permissions): map hasher(blake2_128_concat) (T::AccountId, Role) => bool;
         pub Roles get(fn roles): Vec<Role>;
     }
     add_extra_genesis {
 		config(super_admins): Vec<T::AccountId>;
 		build(|config| {
 			for admin in config.super_admins.iter() {
-                <SuperAdmins<T>>::insert(admin, ());
+                <SuperAdmins<T>>::insert(admin, true);
 			}
 		})
 	}
@@ -66,7 +77,8 @@ decl_storage! {
 
 decl_error! {
 	pub enum Error for Module<T: Trait> {
-		AccessDenied
+		AccessDenied,
+        RoleExisted
 	}
 }
 
@@ -80,32 +92,34 @@ decl_module! {
             T::CreateRoleOrigin::ensure_origin(origin.clone())?;
 
             // TODO: This should be removed and the AccountId should be extracted from the above.
-            let who = ensure_signed(origin)?; 
+            let who = ensure_signed(origin)?;
 
             let role = Role {
                 pallet: pallet_name,
                 permission
             };
 
-            let mut roles = Self::roles();
-            roles.push(role.clone());
-            Roles::put(roles);
-            
-            <Permissions<T>>::insert((who, role), ());
+            let roles = Self::roles();
+            if roles.contains(&role) {
+                return Err(Error::<T>::RoleExisted.into());
+            }
+
+            Roles::append(role.clone());
+            <Permissions<T>>::insert((who, role), true);
+
             Ok(())
         }
-        
+
         #[weight = 10_000]
         pub fn assign_role(origin, account_id: T::AccountId, role: Role) -> dispatch::DispatchResult {
             let who = ensure_signed(origin)?;
 
-            if Self::verify_manage_access(who.clone(), role.pallet.clone()) {
-                Self::deposit_event(RawEvent::AccessGranted(account_id.clone(), role.pallet.clone()));
-                <Permissions<T>>::insert((account_id, role), ());
-            } else {
-                return Err(Error::<T>::AccessDenied.into())
+            if !Self::verify_manage_access(who.clone(), role.pallet.clone()) {
+                return Err(Error::<T>::AccessDenied.into());
             }
-            
+
+            <Permissions<T>>::insert((account_id.clone(), role.clone()), true);
+            Self::deposit_event(RawEvent::AccessGranted(account_id, role.pallet));
             Ok(())
         }
 
@@ -113,41 +127,28 @@ decl_module! {
         pub fn revoke_access(origin, account_id: T::AccountId, role: Role) -> dispatch::DispatchResult {
             let who = ensure_signed(origin)?;
 
-            if Self::verify_manage_access(who, role.pallet.clone()) {
-                Self::deposit_event(RawEvent::AccessRevoked(account_id.clone(), role.pallet.clone()));
-                <Permissions<T>>::remove((account_id, role));
-            } else {
-                return Err(Error::<T>::AccessDenied.into())
+            if !Self::verify_manage_access(who.clone(), role.pallet.clone()) {
+                return Err(Error::<T>::AccessDenied.into());
             }
-            
+
+            <Permissions<T>>::remove((account_id.clone(), role.clone()));
+            Self::deposit_event(RawEvent::AccessRevoked(account_id, role.pallet));
             Ok(())
         }
 
         /// Add a new Super Admin.
         /// Super Admins have access to execute and manage all pallets.
-        /// 
+        ///
         /// Only _root_ can add a Super Admin.
         #[weight = 10_000]
         pub fn add_super_admin(origin, account_id: T::AccountId) -> dispatch::DispatchResult {
             ensure_root(origin)?;
-            <SuperAdmins<T>>::insert(&account_id, ());
+            <SuperAdmins<T>>::insert(&account_id, true);
             Self::deposit_event(RawEvent::SuperAdminAdded(account_id));
             Ok(())
         }
     }
 }
-
-decl_event!(
-    pub enum Event<T>
-    where
-        AccountId = <T as system::Trait>::AccountId,
-    {
-        AccessRevoked(AccountId, Vec<u8>),
-        AccessGranted(AccountId, Vec<u8>),
-        SuperAdminAdded(AccountId),
-    }
-);
-
 
 impl<T: Trait> Module<T> {
     pub fn verify_access(account_id: T::AccountId, pallet: Vec<u8>) -> bool {
@@ -162,15 +163,11 @@ impl<T: Trait> Module<T> {
         };
 
         let roles = Self::roles();
-
-        if roles.contains(&manage_role) && <Permissions<T>>::contains_key((account_id.clone(), manage_role)) {
-            return true;
-        } 
-        
-        if roles.contains(&execute_role) && <Permissions<T>>::contains_key((account_id, execute_role)) {
+        if (roles.contains(&manage_role) && <Permissions<T>>::get((account_id.clone(), manage_role))) ||
+            (roles.contains(&execute_role) && <Permissions<T>>::get((account_id, execute_role)))
+        {
             return true;
         }
-
         false
     }
 
@@ -181,11 +178,9 @@ impl<T: Trait> Module<T> {
         };
 
         let roles = Self::roles();
-
-        if roles.contains(&role) && <Permissions<T>>::contains_key((account_id, role)) {
+        if roles.contains(&role) && <Permissions<T>>::get((account_id, role)) {
             return true;
         }
-
         false
     }
 }
@@ -216,7 +211,7 @@ impl<T: Trait + Send + Sync> Debug for Authorize<T> {
 	}
 }
 
-impl<T: Trait + Send + Sync> SignedExtension for Authorize<T> where 
+impl<T: Trait + Send + Sync> SignedExtension for Authorize<T> where
     T::Call: Dispatchable<Info=DispatchInfo> + GetCallMetadata {
     type AccountId = T::AccountId;
 	type Call = T::Call;
