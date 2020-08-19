@@ -14,7 +14,7 @@ use frame_support::{
     weights::DispatchInfo,
     traits::GetCallMetadata
 };
-use system::{self as system, ensure_root, ensure_signed};
+use frame_system::{self as system, ensure_root, ensure_signed};
 use sp_runtime::{
     print, RuntimeDebug,
     transaction_validity::{
