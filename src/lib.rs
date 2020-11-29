@@ -30,6 +30,7 @@ pub trait Trait: system::Trait {
 }
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode)]
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
 pub enum Permission {
     Execute,
     Manage,
@@ -51,9 +52,10 @@ impl Default for Permission {
 }
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode)]
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
 pub struct Role {
-    pallet: Vec<u8>,
-    permission: Permission,
+    pub pallet: Vec<u8>,
+    pub permission: Permission,
 }
 
 decl_event!(
@@ -76,9 +78,20 @@ decl_storage! {
     }
     add_extra_genesis {
         config(super_admins): Vec<T::AccountId>;
+        config(permissions): Vec<(Role, Vec<T::AccountId>)>;
         build(|config| {
             for admin in config.super_admins.iter() {
                 <SuperAdmins<T>>::insert(admin, true);
+            }
+
+            for (role, members) in config.permissions.iter() {
+                if !Module::<T>::add_role(role) {
+                    panic!("Can't add duplicate roles.");
+                }
+
+                for member in members.iter() {
+                    <Permissions<T>>::insert((member, role), true);
+                }
             }
         })
     }
@@ -108,12 +121,10 @@ decl_module! {
                 permission: permission.clone()
             };
 
-            let roles = Self::roles();
-            if roles.contains(&role) {
+            if !Self::add_role(&role) {
                 return Err(Error::<T>::RoleExisted.into());
             }
 
-            Roles::append(role.clone());
             <Permissions<T>>::insert((who.clone(), role.clone()), true);
             Self::deposit_event(RawEvent::RoleCreated(who, pallet_name, permission.as_bytes().to_vec()));
             Ok(())
@@ -160,6 +171,16 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
+    fn add_role(role: &Role) -> bool {
+        let roles = Self::roles();
+        if roles.contains(role) {
+            return false;
+        }
+
+        Roles::append(role.clone());
+        true
+    }
+
     pub fn verify_access(account_id: T::AccountId, pallet: Vec<u8>) -> bool {
         let execute_role = Role {
             pallet: pallet.clone(),
