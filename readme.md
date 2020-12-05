@@ -1,12 +1,24 @@
-# Substrate Role-based Access Control Pallet
+# FRAME Role-Based Access Control Pallet
 
-A [Substrate](https://github.com/paritytech/substrate) pallet implementing role-based access control and permissions for Substrate extrinsic calls.
+A [FRAME](https://substrate.dev/docs/en/knowledgebase/runtime/) pallet (runtime module) for [Substrate](https://github.com/paritytech/substrate)-based
+blockchains that implements role-based access control for Substrate [extrinsic](https://substrate.dev/docs/en/knowledgebase/learn-substrate/extrinsics) calls.
 
-The filtering of incoming extrinsics and their sender accounts is done at the transaction queue validation layer, using the `SignedExtension` trait.
+Access control validation is done at the [transaction pool](https://substrate.dev/docs/en/knowledgebase/learn-substrate/tx-pool) validation layer, using
+Substrate's [signed extension](https://substrate.dev/docs/en/knowledgebase/learn-substrate/extrinsics#signed-extension) capabilities.
+
+## Description
+
+This pallet maintains an on-chain registry of roles and the users to which those roles are assigned. A `Role` is a tuple that encapsulates the name of a pallet
+and a `Permission` that qualifies the level of access granted by the `Role`. A `Permission` is an enum with the following variants: `Execute` and `Manage`. The
+`Execute` permission allows a user to invoke a pallet's dispatchable functions. The `Manage` permission allows a user to assign and revoke roles for a pallet
+and also implies the `Execute` permission. The RBAC pallet also defines "super admin" role that has `Execute` permission on all pallets. Super admins may be
+configured in the [chain specification](https://substrate.dev/docs/en/knowledgebase/integrate/chain-spec); the
+[`Root` origin](https://substrate.dev/docs/en/knowledgebase/runtime/origin) also has the privilege to dynamically configure super admins.
 
 ## Usage
 
-* Add the module's dependency in the `Cargo.toml` of your `runtime` directory. Make sure to enter the correct path or git url of the pallet as per your setup.
+* Add the module as a dependency in the `Cargo.toml` of your `runtime` directory. Make sure to enter the correct path or git url of the pallet as per your
+  setup.
 
 ```toml
 [dependencies.substrate_rbac]
@@ -52,7 +64,10 @@ pub type SignedExtra = (
 
 ```rust
 rbac: Some(RBACConfig {
-	super_admins: vec![get_account_id_from_seed::<sr25519::Public>("Alice")]
+	super_admins: vec![get_account_id_from_seed::<sr25519::Public>("Alice")],
+	permissions: vec![(Role { pallet: b"Rbac".to_vec(), permission: Permission::Manage },
+					  vec![get_account_id_from_seed::<sr25519::Public>("Alice")])
+	],
 })
 ```
 
