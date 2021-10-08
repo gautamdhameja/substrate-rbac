@@ -20,8 +20,9 @@ default-features = false
 ```rust
 pub use substrate_rbac;
 
-impl substrate_rbac::Trait for Runtime {
+impl substrate_rbac::Config for Runtime {
     type Event = Event;
+    type RbacAdminOrigin = EnsureRoot<AccountId>;
 }
 
 construct_runtime!(
@@ -33,7 +34,7 @@ construct_runtime!(
         ...
         ...
         ...
-        RBAC: substrate_rbac::{Module, Call, Storage, Event<T>, Config<T>},
+        RBAC: substrate_rbac::{Pallet, Call, Storage, Event<T>, Config<T>},
     }
 );
 ```
