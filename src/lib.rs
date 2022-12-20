@@ -287,14 +287,4 @@ where
             Err(InvalidTransaction::Call.into())
         }
     }
-
-    fn pre_dispatch(
-        self,
-        who: &Self::AccountId,
-        call: &Self::Call,
-        info: &DispatchInfoOf<Self::Call>,
-        len: usize,
-    ) -> Result<Self::Pre, TransactionValidityError> {
-        todo!()
-    }
 }
