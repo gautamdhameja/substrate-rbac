@@ -12,7 +12,6 @@ pub use pallet::*;
 use scale_info::TypeInfo;
 // use scale_info::TypeInfo;
 use sp_runtime::{
-    print,
     traits::{DispatchInfoOf, Dispatchable, SignedExtension},
     transaction_validity::{InvalidTransaction, TransactionValidity, TransactionValidityError},
     RuntimeDebug,
@@ -247,6 +246,10 @@ impl<T: Config + Send + Sync> Authorize<T> {
     pub fn new() -> Self {
         Self(sp_std::marker::PhantomData)
     }
+
+    pub fn do_pre_dispatch(info: DispatchInfo, len: usize) -> Result<(), TransactionValidityError> {
+        Ok(())
+    }
 }
 
 impl<T: Config + Send + Sync> SignedExtension for Authorize<T>
@@ -264,6 +267,7 @@ where
         Ok(())
     }
 
+    /** Used to drop the transaction at the transaction pool level and prevents a transaction from being gossiped */
     fn validate(
         &self,
         who: &Self::AccountId,
@@ -274,17 +278,33 @@ where
         let md = call.get_call_metadata();
 
         if <SuperAdmins<T>>::contains_key(who.clone()) {
-            print("Access Granted!");
+            log::info!("Access Granted!");
             Ok(Default::default())
         } else if <Pallet<T>>::verify_execute_access(
             who.clone(),
             md.pallet_name.as_bytes().to_vec(),
         ) {
-            print("Access Granted!");
+            log::info!("Access Granted!");
             Ok(Default::default())
         } else {
-            print("Access Denied!");
+            log::info!("Access Denied!");
             Err(InvalidTransaction::Call.into())
+        }
+    }
+
+    /** Use to hook in before the transaction runs */
+    fn pre_dispatch(
+        self,
+        who: &Self::AccountId,
+        call: &Self::Call,
+        info: &DispatchInfoOf<Self::Call>,
+        len: usize,
+    ) -> Result<Self::Pre, TransactionValidityError> {
+        log::info!("pre dispatch {:?} {:?} {:?}, {:?}", who, call, info, len);
+
+        match self.validate(who, call, info, len) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 }
