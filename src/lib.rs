@@ -3,15 +3,17 @@
 //! The RBAC Pallet implements role-based access control and permissions for Substrate extrinsic calls.
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(feature = "std")]
-use frame_support::serde::{Deserialize, Serialize};
+pub use pallet::*;
 
 use codec::{Decode, Encode};
+
+#[cfg(feature = "std")]
+use frame_support::serde::{Deserialize, Serialize};
 use frame_support::{
     dispatch::{DispatchInfo, PostDispatchInfo},
     traits::GetCallMetadata,
 };
-pub use pallet::*;
+
 use scale_info::TypeInfo;
 // use scale_info::TypeInfo;
 use sp_runtime::{
@@ -49,17 +51,25 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::getter(fn permissions)]
-    pub type Permissions<T: Config> = StorageMap<_, Blake2_128Concat, (T::AccountId, Role), ()>;
+    pub type Permissions<T: Config> = StorageNMap<
+        _,
+        (
+            storage::Key<Blake2_128Concat, T::AccountId>,
+            storage::Key<Blake2_128Concat, AccessControl>,
+        ),
+        (),
+    >;
 
+    // Store access controls for Executing and managing a specific extrinsic on a pallet.
     #[pallet::storage]
     #[pallet::getter(fn roles)]
-    pub type Roles<T: Config> = StorageMap<_, Blake2_128Concat, Role, ()>;
+    pub type AccessControls<T: Config> = StorageMap<_, Blake2_128Concat, AccessControl, ()>;
 
     #[pallet::genesis_config]
     pub struct GenesisConfig<T: Config> {
         pub super_admins: Vec<T::AccountId>,
-        pub permissions: Vec<(T::AccountId, Role)>,
-        pub roles: Vec<Role>,
+        pub permissions: Vec<(T::AccountId, AccessControl)>,
+        pub access_controls: Vec<AccessControl>,
     }
 
     #[cfg(feature = "std")]
@@ -68,7 +78,7 @@ pub mod pallet {
             Self {
                 super_admins: Vec::new(),
                 permissions: Vec::new(),
-                roles: Vec::new(),
+                access_controls: Vec::new(),
             }
         }
     }
@@ -85,8 +95,8 @@ pub mod pallet {
                 <Permissions<T>>::insert(permission, ());
             }
 
-            for role in &self.roles {
-                <Roles<T>>::insert(role, ());
+            for role in &self.access_controls {
+                <AccessControls<T>>::insert(role, ());
             }
         }
     }
@@ -120,13 +130,13 @@ pub mod pallet {
         ) -> DispatchResult {
             ensure_signed(origin)?;
 
-            let role = Role {
+            let role = AccessControl {
                 pallet: pallet_name,
                 function: pallet_function,
                 permission,
             };
 
-            Roles::<T>::insert(role, ());
+            AccessControls::<T>::insert(role, ());
 
             Ok(())
         }
@@ -135,7 +145,7 @@ pub mod pallet {
         pub fn assign_role(
             origin: OriginFor<T>,
             account_id: T::AccountId,
-            role: Role,
+            role: AccessControl,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -146,7 +156,8 @@ pub mod pallet {
                         role.pallet.clone().into(),
                         role.function.clone().into(),
                     ));
-                    <Permissions<T>>::insert((account_id, role), ());
+
+                    <Permissions<T>>::insert((account_id, role), ()); // access_permission);
                     return Ok(());
                 }
                 Err(e) => {
@@ -161,7 +172,7 @@ pub mod pallet {
         pub fn revoke_access(
             origin: OriginFor<T>,
             account_id: T::AccountId,
-            role: Role,
+            role: AccessControl,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
             // Ok(())
@@ -212,7 +223,7 @@ impl Default for Permission {
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub struct Role {
+pub struct AccessControl {
     pub pallet: Vec<u8>,
     pub function: Vec<u8>,
     pub permission: Permission,
@@ -228,13 +239,13 @@ impl<T: Config> Pallet<T> {
         pallet: Vec<u8>,
         function: Vec<u8>,
     ) -> Result<(), Error<T>> {
-        let role = Role {
+        let role = AccessControl {
             pallet,
             function,
             permission: Permission::Execute,
         };
 
-        if <Roles<T>>::contains_key(&role) {
+        if <AccessControls<T>>::contains_key(&role) {
             if <Permissions<T>>::contains_key((account_id, role)) {
                 return Ok(());
             } else {
@@ -253,13 +264,15 @@ impl<T: Config> Pallet<T> {
         pallet: Vec<u8>,
         function: Vec<u8>,
     ) -> Result<(), Error<T>> {
-        let role = Role {
+        let role = AccessControl {
             pallet,
             function,
             permission: Permission::Manage,
         };
 
-        if <Roles<T>>::contains_key(&role) && <Permissions<T>>::contains_key((account_id, role)) {
+        if <AccessControls<T>>::contains_key(&role)
+            && <Permissions<T>>::contains_key((account_id, role))
+        {
             return Ok(());
         }
 
