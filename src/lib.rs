@@ -3,11 +3,13 @@
 //! The RBAC Pallet implements role-based access control and permissions for Substrate extrinsic calls.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(feature = "std")]
+use frame_support::serde::{Deserialize, Serialize};
+
 use codec::{Decode, Encode};
 use frame_support::{
     dispatch::{DispatchInfo, PostDispatchInfo},
     traits::GetCallMetadata,
-    Deserialize, Serialize,
 };
 pub use pallet::*;
 use scale_info::TypeInfo;
@@ -33,8 +35,6 @@ pub mod pallet {
 
         /// Origin for adding or removing a roles and permissions.
         type RbacAdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
-
-        type MaxSize: Get<u32>;
     }
 
     #[pallet::pallet]
@@ -79,6 +79,14 @@ pub mod pallet {
         fn build(&self) {
             for admin in &self.super_admins {
                 <SuperAdmins<T>>::insert(admin, ());
+            }
+
+            for permission in &self.permissions {
+                <Permissions<T>>::insert(permission, ());
+            }
+
+            for role in &self.roles {
+                <Roles<T>>::insert(role, ());
             }
         }
     }
@@ -189,11 +197,8 @@ pub mod pallet {
     }
 }
 
-impl<T: Config> Pallet<T> {
-    // Helpers
-}
-
-#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo, Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum Permission {
     Execute = 1,
     Manage = 2,
@@ -205,14 +210,19 @@ impl Default for Permission {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo, Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Role {
-    pallet: Vec<u8>,
-    function: Vec<u8>,
-    permission: Permission,
+    pub pallet: Vec<u8>,
+    pub function: Vec<u8>,
+    pub permission: Permission,
 }
 
 impl<T: Config> Pallet<T> {
+    /** Verify that account can execute a function on a pallet.
+     All Pallet functions works as normal when it does not have a Role created for it.
+     Access is denied when then pallet and function has a role, and the account does not have permission to execute
+    */
     pub fn verify_execute_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
@@ -224,13 +234,20 @@ impl<T: Config> Pallet<T> {
             permission: Permission::Execute,
         };
 
-        if <Roles<T>>::contains_key(&role) && <Permissions<T>>::contains_key((account_id, role)) {
-            return Ok(());
+        if <Roles<T>>::contains_key(&role) {
+            if <Permissions<T>>::contains_key((account_id, role)) {
+                return Ok(());
+            } else {
+                return Err(Error::<T>::AccessDenied.into());
+            }
         }
 
-        Err(Error::<T>::AccessDenied)
+        Ok(())
     }
 
+    /** Verify the ability to manage the access to a pallets extrinsics.
+     The user must either be an Admin or have the Manage permission for a pallet and function.
+    */
     fn verify_manage_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
@@ -307,16 +324,8 @@ where
         _len: usize,
     ) -> TransactionValidity {
         let md = call.get_call_metadata();
-        log::info!("Call metadata: {:?}", md);
-
         if <SuperAdmins<T>>::contains_key(who.clone()) {
-            log::info!(
-                "Access Granted!\n who: {:?}\n call: {:?}\n info: {:?}\n len {:?}\n",
-                who,
-                call,
-                _info,
-                _len
-            );
+            // log::info!("Access Granted!");
             return Ok(Default::default());
         }
 
@@ -326,18 +335,12 @@ where
             md.function_name.as_bytes().to_vec(),
         ) {
             Ok(_) => {
-                log::info!("Access Granted!");
+                // log::info!("Access Granted!");
                 Ok(Default::default())
             }
             Err(e) => {
                 log::error!("{:?}", e);
-                log::info!(
-                    "Access Denied! \n who: {:?}\n call: {:?}\n info: {:?}\n len {:?}\n",
-                    who,
-                    call,
-                    _info,
-                    _len
-                );
+                log::info!("Access Denied! who: {:?}", who);
                 Err(InvalidTransaction::Call.into())
             }
         }
@@ -351,8 +354,6 @@ where
         info: &DispatchInfoOf<Self::Call>,
         len: usize,
     ) -> Result<Self::Pre, TransactionValidityError> {
-        log::info!("pre dispatch {:?} {:?} {:?}, {:?}", who, call, info, len);
-
         match self.validate(who, call, info, len) {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
