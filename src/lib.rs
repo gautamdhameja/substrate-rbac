@@ -7,6 +7,7 @@ use codec::{Decode, Encode};
 use frame_support::{
     dispatch::{DispatchInfo, PostDispatchInfo},
     traits::GetCallMetadata,
+    Deserialize, Serialize,
 };
 pub use pallet::*;
 use scale_info::TypeInfo;
@@ -32,6 +33,8 @@ pub mod pallet {
 
         /// Origin for adding or removing a roles and permissions.
         type RbacAdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+
+        type MaxSize: Get<u32>;
     }
 
     #[pallet::pallet]
@@ -55,6 +58,8 @@ pub mod pallet {
     #[pallet::genesis_config]
     pub struct GenesisConfig<T: Config> {
         pub super_admins: Vec<T::AccountId>,
+        pub permissions: Vec<(T::AccountId, Role)>,
+        pub roles: Vec<Role>,
     }
 
     #[cfg(feature = "std")]
@@ -62,6 +67,8 @@ pub mod pallet {
         fn default() -> Self {
             Self {
                 super_admins: Vec::new(),
+                permissions: Vec::new(),
+                roles: Vec::new(),
             }
         }
     }
@@ -79,8 +86,8 @@ pub mod pallet {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        AccessRevoked(T::AccountId, Vec<u8>),
-        AccessGranted(T::AccountId, Vec<u8>),
+        AccessRevoked(T::AccountId, Vec<u8>, Vec<u8>),
+        AccessGranted(T::AccountId, Vec<u8>, Vec<u8>),
         SuperAdminAdded(T::AccountId),
     }
 
@@ -88,6 +95,7 @@ pub mod pallet {
     #[pallet::error]
     pub enum Error<T> {
         AccessDenied,
+        InvalidNameSize,
     }
 
     #[pallet::hooks]
@@ -99,12 +107,14 @@ pub mod pallet {
         pub fn create_role(
             origin: OriginFor<T>,
             pallet_name: Vec<u8>,
+            pallet_function: Vec<u8>,
             permission: Permission,
         ) -> DispatchResult {
             ensure_signed(origin)?;
 
             let role = Role {
                 pallet: pallet_name,
+                function: pallet_function,
                 permission,
             };
 
@@ -121,17 +131,22 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            if Self::verify_manage_access(who, role.pallet.clone()) {
-                Self::deposit_event(Event::AccessGranted(
-                    account_id.clone(),
-                    role.pallet.clone(),
-                ));
-                <Permissions<T>>::insert((account_id, role), ());
-            } else {
-                return Err(Error::<T>::AccessDenied.into());
-            }
+            match Self::verify_manage_access(who, role.pallet.clone(), role.function.clone()) {
+                Ok(_) => {
+                    Self::deposit_event(Event::AccessGranted(
+                        account_id.clone(),
+                        role.pallet.clone().into(),
+                        role.function.clone().into(),
+                    ));
+                    <Permissions<T>>::insert((account_id, role), ());
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::error!("assign role failed: {:?}", e);
 
-            Ok(())
+                    return Err(Error::<T>::AccessDenied.into());
+                }
+            }
         }
 
         #[pallet::weight(0)]
@@ -141,18 +156,23 @@ pub mod pallet {
             role: Role,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+            // Ok(())
 
-            if Self::verify_manage_access(who, role.pallet.clone()) {
-                Self::deposit_event(Event::AccessRevoked(
-                    account_id.clone(),
-                    role.pallet.clone(),
-                ));
-                <Permissions<T>>::remove((account_id, role));
-            } else {
-                return Err(Error::<T>::AccessDenied.into());
+            match Self::verify_manage_access(who, role.pallet.clone(), role.function.clone()) {
+                Ok(_) => {
+                    Self::deposit_event(Event::AccessRevoked(
+                        account_id.clone(),
+                        role.pallet.clone().into(),
+                        role.function.clone().into(),
+                    ));
+                    <Permissions<T>>::remove((account_id, role));
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::error!("revoke role failed: {:?}", e);
+                    return Err(Error::<T>::AccessDenied.into());
+                }
             }
-
-            Ok(())
         }
 
         /// Add a new Super Admin.
@@ -169,7 +189,11 @@ pub mod pallet {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+impl<T: Config> Pallet<T> {
+    // Helpers
+}
+
+#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo, Deserialize, Serialize)]
 pub enum Permission {
     Execute = 1,
     Manage = 2,
@@ -181,37 +205,48 @@ impl Default for Permission {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo, Deserialize, Serialize)]
 pub struct Role {
-    pallet: Vec<u8>, // Update to be a BoundedVec
+    pallet: Vec<u8>,
+    function: Vec<u8>,
     permission: Permission,
 }
 
 impl<T: Config> Pallet<T> {
-    pub fn verify_execute_access(account_id: T::AccountId, pallet: Vec<u8>) -> bool {
+    pub fn verify_execute_access(
+        account_id: T::AccountId,
+        pallet: Vec<u8>,
+        function: Vec<u8>,
+    ) -> Result<(), Error<T>> {
         let role = Role {
             pallet,
+            function,
             permission: Permission::Execute,
         };
 
         if <Roles<T>>::contains_key(&role) && <Permissions<T>>::contains_key((account_id, role)) {
-            return true;
+            return Ok(());
         }
 
-        false
+        Err(Error::<T>::AccessDenied)
     }
 
-    fn verify_manage_access(account_id: T::AccountId, pallet: Vec<u8>) -> bool {
+    fn verify_manage_access(
+        account_id: T::AccountId,
+        pallet: Vec<u8>,
+        function: Vec<u8>,
+    ) -> Result<(), Error<T>> {
         let role = Role {
             pallet,
+            function,
             permission: Permission::Manage,
         };
 
         if <Roles<T>>::contains_key(&role) && <Permissions<T>>::contains_key((account_id, role)) {
-            return true;
+            return Ok(());
         }
 
-        false
+        Err(Error::<T>::AccessDenied)
     }
 }
 
@@ -246,10 +281,6 @@ impl<T: Config + Send + Sync> Authorize<T> {
     pub fn new() -> Self {
         Self(sp_std::marker::PhantomData)
     }
-
-    pub fn do_pre_dispatch(info: DispatchInfo, len: usize) -> Result<(), TransactionValidityError> {
-        Ok(())
-    }
 }
 
 impl<T: Config + Send + Sync> SignedExtension for Authorize<T>
@@ -276,19 +307,39 @@ where
         _len: usize,
     ) -> TransactionValidity {
         let md = call.get_call_metadata();
+        log::info!("Call metadata: {:?}", md);
 
         if <SuperAdmins<T>>::contains_key(who.clone()) {
-            log::info!("Access Granted!");
-            Ok(Default::default())
-        } else if <Pallet<T>>::verify_execute_access(
+            log::info!(
+                "Access Granted!\n who: {:?}\n call: {:?}\n info: {:?}\n len {:?}\n",
+                who,
+                call,
+                _info,
+                _len
+            );
+            return Ok(Default::default());
+        }
+
+        match <Pallet<T>>::verify_execute_access(
             who.clone(),
             md.pallet_name.as_bytes().to_vec(),
+            md.function_name.as_bytes().to_vec(),
         ) {
-            log::info!("Access Granted!");
-            Ok(Default::default())
-        } else {
-            log::info!("Access Denied!");
-            Err(InvalidTransaction::Call.into())
+            Ok(_) => {
+                log::info!("Access Granted!");
+                Ok(Default::default())
+            }
+            Err(e) => {
+                log::error!("{:?}", e);
+                log::info!(
+                    "Access Denied! \n who: {:?}\n call: {:?}\n info: {:?}\n len {:?}\n",
+                    who,
+                    call,
+                    _info,
+                    _len
+                );
+                Err(InvalidTransaction::Call.into())
+            }
         }
     }
 
