@@ -26,7 +26,10 @@ use sp_std::prelude::*;
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
-    use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
+    use frame_support::{
+        dispatch::DispatchResult,
+        pallet_prelude::{OptionQuery, *},
+    };
     use frame_system::pallet_prelude::*;
     use sp_std::convert::TryInto;
 
@@ -35,7 +38,7 @@ pub mod pallet {
         /// The Event type.
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
-        /// Origin for adding or removing a roles and permissions.
+        /// Origin for adding or removing a access_controls and permissions.
         type RbacAdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
@@ -49,27 +52,16 @@ pub mod pallet {
     #[pallet::getter(fn super_admins)]
     pub type SuperAdmins<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, ()>;
 
-    #[pallet::storage]
-    #[pallet::getter(fn permissions)]
-    pub type Permissions<T: Config> = StorageNMap<
-        _,
-        (
-            storage::Key<Blake2_128Concat, T::AccountId>,
-            storage::Key<Blake2_128Concat, AccessControl>,
-        ),
-        (),
-    >;
-
     // Store access controls for Executing and managing a specific extrinsic on a pallet.
     #[pallet::storage]
-    #[pallet::getter(fn roles)]
-    pub type AccessControls<T: Config> = StorageMap<_, Blake2_128Concat, AccessControl, ()>;
+    #[pallet::getter(fn access_controls)]
+    pub type AccessControls<T: Config> =
+        StorageMap<_, Blake2_128Concat, AccessControl, Vec<T::AccountId>, OptionQuery>;
 
     #[pallet::genesis_config]
     pub struct GenesisConfig<T: Config> {
         pub super_admins: Vec<T::AccountId>,
-        pub permissions: Vec<(T::AccountId, AccessControl)>,
-        pub access_controls: Vec<AccessControl>,
+        pub access_controls: Vec<(AccessControl, Vec<T::AccountId>)>,
     }
 
     #[cfg(feature = "std")]
@@ -77,7 +69,6 @@ pub mod pallet {
         fn default() -> Self {
             Self {
                 super_admins: Vec::new(),
-                permissions: Vec::new(),
                 access_controls: Vec::new(),
             }
         }
@@ -91,12 +82,8 @@ pub mod pallet {
                 <SuperAdmins<T>>::insert(admin, ());
             }
 
-            for permission in &self.permissions {
-                <Permissions<T>>::insert(permission, ());
-            }
-
-            for role in &self.access_controls {
-                <AccessControls<T>>::insert(role, ());
+            for access_control in &self.access_controls {
+                <AccessControls<T>>::insert(access_control.0.clone(), access_control.1.clone());
             }
         }
     }
@@ -107,6 +94,7 @@ pub mod pallet {
         AccessRevoked(T::AccountId, Vec<u8>, Vec<u8>),
         AccessGranted(T::AccountId, Vec<u8>, Vec<u8>),
         SuperAdminAdded(T::AccountId),
+        SuperAdminRevoked(T::AccountId),
     }
 
     #[derive(PartialEq)]
@@ -114,6 +102,7 @@ pub mod pallet {
     pub enum Error<T> {
         AccessDenied,
         InvalidNameSize,
+        AccessControlNotFound,
     }
 
     #[pallet::hooks]
@@ -122,7 +111,7 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         #[pallet::weight(0)]
-        pub fn create_role(
+        pub fn create_access_control(
             origin: OriginFor<T>,
             pallet_name: Vec<u8>,
             pallet_function: Vec<u8>,
@@ -130,40 +119,54 @@ pub mod pallet {
         ) -> DispatchResult {
             ensure_signed(origin)?;
 
-            let role = AccessControl {
+            let access_control = AccessControl {
                 pallet: pallet_name,
                 function: pallet_function,
                 permission,
             };
 
-            AccessControls::<T>::insert(role, ());
+            let accounts: Vec<T::AccountId> = Vec::new();
+
+            AccessControls::<T>::insert(access_control, accounts);
 
             Ok(())
         }
 
         #[pallet::weight(0)]
-        pub fn assign_role(
+        pub fn assign_access_control(
             origin: OriginFor<T>,
             account_id: T::AccountId,
-            role: AccessControl,
+            access_control: AccessControl,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            match Self::verify_manage_access(who, role.pallet.clone(), role.function.clone()) {
+            match Self::verify_manage_access(
+                who,
+                access_control.pallet.clone(),
+                access_control.function.clone(),
+            ) {
                 Ok(_) => {
                     Self::deposit_event(Event::AccessGranted(
                         account_id.clone(),
-                        role.pallet.clone().into(),
-                        role.function.clone().into(),
+                        access_control.pallet.clone().into(),
+                        access_control.function.clone().into(),
                     ));
 
-                    <Permissions<T>>::insert((account_id, role), ()); // access_permission);
+                    match AccessControls::<T>::get(access_control.clone()) {
+                        Some(mut accounts) => {
+                            log::info!("Accounts: {:?}", accounts);
+                            accounts.push(account_id.clone());
+                            AccessControls::<T>::insert(access_control.clone(), accounts);
+                        }
+                        None => return Err(Error::<T>::AccessControlNotFound.into()),
+                    }
+
                     return Ok(());
                 }
                 Err(e) => {
-                    log::error!("assign role failed: {:?}", e);
+                    log::error!("assign access_control failed: {:?}", e);
 
-                    return Err(Error::<T>::AccessDenied.into());
+                    return Err(e.into());
                 }
             }
         }
@@ -172,24 +175,37 @@ pub mod pallet {
         pub fn revoke_access(
             origin: OriginFor<T>,
             account_id: T::AccountId,
-            role: AccessControl,
+            access_control: AccessControl,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            // Ok(())
 
-            match Self::verify_manage_access(who, role.pallet.clone(), role.function.clone()) {
+            match Self::verify_manage_access(
+                who,
+                access_control.pallet.clone(),
+                access_control.function.clone(),
+            ) {
                 Ok(_) => {
                     Self::deposit_event(Event::AccessRevoked(
                         account_id.clone(),
-                        role.pallet.clone().into(),
-                        role.function.clone().into(),
+                        access_control.pallet.clone().into(),
+                        access_control.function.clone().into(),
                     ));
-                    <Permissions<T>>::remove((account_id, role));
+
+                    match AccessControls::<T>::get(access_control.clone()) {
+                        Some(mut accounts) => {
+                            log::info!("Accounts: {:?}", accounts);
+                            accounts.retain(|stored_account| stored_account != &account_id);
+                        }
+                        None => {
+                            return Err(Error::<T>::AccessControlNotFound.into());
+                        }
+                    }
+
                     return Ok(());
                 }
                 Err(e) => {
-                    log::error!("revoke role failed: {:?}", e);
-                    return Err(Error::<T>::AccessDenied.into());
+                    log::error!("revoke access_control failed: {:?}", e);
+                    return Err(e.into());
                 }
             }
         }
@@ -201,8 +217,21 @@ pub mod pallet {
         #[pallet::weight(0)]
         pub fn add_super_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
             T::RbacAdminOrigin::ensure_origin(origin)?;
+
             <SuperAdmins<T>>::insert(&account_id, ());
             Self::deposit_event(Event::SuperAdminAdded(account_id));
+            Ok(())
+        }
+
+        #[pallet::weight(0)]
+        pub fn revoke_super_admin(
+            origin: OriginFor<T>,
+            account_id: T::AccountId,
+        ) -> DispatchResult {
+            T::RbacAdminOrigin::ensure_origin(origin)?;
+
+            <SuperAdmins<T>>::remove(&account_id);
+            Self::deposit_event(Event::SuperAdminRevoked(account_id));
             Ok(())
         }
     }
@@ -231,52 +260,56 @@ pub struct AccessControl {
 
 impl<T: Config> Pallet<T> {
     /** Verify that account can execute a function on a pallet.
-     All Pallet functions works as normal when it does not have a Role created for it.
-     Access is denied when then pallet and function has a role, and the account does not have permission to execute
+     All Pallet functions works as normal when it does not have a access_control created for it.
+     Access is denied when then pallet and function has a access_control, and the account does not have permission to execute
     */
     pub fn verify_execute_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
         function: Vec<u8>,
     ) -> Result<(), Error<T>> {
-        let role = AccessControl {
+        let access_control = AccessControl {
             pallet,
             function,
             permission: Permission::Execute,
         };
 
-        if <AccessControls<T>>::contains_key(&role) {
-            if <Permissions<T>>::contains_key((account_id, role)) {
-                return Ok(());
-            } else {
-                return Err(Error::<T>::AccessDenied.into());
-            }
-        }
-
-        Ok(())
+        Self::verify_access(account_id, access_control)
     }
 
     /** Verify the ability to manage the access to a pallets extrinsics.
      The user must either be an Admin or have the Manage permission for a pallet and function.
     */
-    fn verify_manage_access(
+    pub fn verify_manage_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
         function: Vec<u8>,
     ) -> Result<(), Error<T>> {
-        let role = AccessControl {
+        let access_control = AccessControl {
             pallet,
             function,
             permission: Permission::Manage,
         };
 
-        if <AccessControls<T>>::contains_key(&role)
-            && <Permissions<T>>::contains_key((account_id, role))
-        {
-            return Ok(());
-        }
+        Self::verify_access(account_id, access_control)
+    }
 
-        Err(Error::<T>::AccessDenied)
+    /** Private helper method for access authentication */
+    fn verify_access(
+        account_id: T::AccountId,
+        access_control: AccessControl,
+    ) -> Result<(), Error<T>> {
+        match <AccessControls<T>>::get(&access_control) {
+            Some(accounts) => {
+                log::info!("Accounts: {:?}", accounts);
+                if accounts.contains(&account_id) {
+                    return Ok(());
+                } else {
+                    return Err(Error::<T>::AccessDenied.into());
+                }
+            }
+            None => Ok(()),
+        }
     }
 }
 
