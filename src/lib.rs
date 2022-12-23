@@ -4,6 +4,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
+pub mod traits;
 
 use codec::{Decode, Encode};
 
@@ -22,6 +23,7 @@ use sp_runtime::{
     RuntimeDebug,
 };
 use sp_std::prelude::*;
+use traits::{TraitError, VerifyAccess};
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -101,7 +103,6 @@ pub mod pallet {
     #[pallet::error]
     pub enum Error<T> {
         AccessDenied,
-        InvalidNameSize,
         AccessControlNotFound,
     }
 
@@ -267,6 +268,7 @@ impl<T: Config> Pallet<T> {
         account_id: T::AccountId,
         pallet: Vec<u8>,
         function: Vec<u8>,
+        requires_access_control: Option<bool>,
     ) -> Result<(), Error<T>> {
         let access_control = AccessControl {
             pallet,
@@ -274,7 +276,7 @@ impl<T: Config> Pallet<T> {
             permission: Permission::Execute,
         };
 
-        Self::verify_access(account_id, access_control)
+        Self::verify_access(account_id, access_control, requires_access_control)
     }
 
     /** Verify the ability to manage the access to a pallets extrinsics.
@@ -291,24 +293,46 @@ impl<T: Config> Pallet<T> {
             permission: Permission::Manage,
         };
 
-        Self::verify_access(account_id, access_control)
+        Self::verify_access(account_id, access_control, None)
     }
 
     /** Private helper method for access authentication */
     fn verify_access(
         account_id: T::AccountId,
         access_control: AccessControl,
+        requires_access_control: Option<bool>,
     ) -> Result<(), Error<T>> {
         match <AccessControls<T>>::get(&access_control) {
             Some(accounts) => {
-                log::info!("Accounts: {:?}", accounts);
                 if accounts.contains(&account_id) {
                     return Ok(());
                 } else {
                     return Err(Error::<T>::AccessDenied.into());
                 }
             }
-            None => Ok(()),
+            None => {
+                if requires_access_control.unwrap_or(false) {
+                    return Err(Error::<T>::AccessDenied.into());
+                } else {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+impl<T: Config> VerifyAccess<T::AccountId> for Pallet<T> {
+    /** Expose the verify_execute_access to other pallets
+    When using the trait if the AccessControl is not present the verification will fail
+    */
+    fn verify_execute_access(
+        account_id: T::AccountId,
+        pallet: Vec<u8>,
+        function: Vec<u8>,
+    ) -> Result<(), TraitError> {
+        match Self::verify_execute_access(account_id, pallet, function, Some(true)) {
+            Ok(()) => Ok(()),
+            Err(_e) => Err(TraitError::AccessDenied),
         }
     }
 }
@@ -379,14 +403,14 @@ where
             who.clone(),
             md.pallet_name.as_bytes().to_vec(),
             md.function_name.as_bytes().to_vec(),
+            None,
         ) {
             Ok(_) => {
                 // log::info!("Access Granted!");
                 Ok(Default::default())
             }
             Err(e) => {
-                log::error!("{:?}", e);
-                log::info!("Access Denied! who: {:?}", who);
+                log::info!("{:?}! who: {:?}", e, who);
                 Err(InvalidTransaction::Call.into())
             }
         }
