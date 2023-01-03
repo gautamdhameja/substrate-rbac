@@ -1,6 +1,6 @@
-//! # Role-based Access Control (RBAC) Pallet
+//! # Access Control Pallet
 //!
-//! The RBAC Pallet implements role-based access control and permissions for Substrate extrinsic calls.
+//! Implements Access controls for allowing specific addresses to sign extrinsics and permissions for assigning access.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
@@ -16,7 +16,6 @@ use frame_support::{
 };
 
 use scale_info::TypeInfo;
-// use scale_info::TypeInfo;
 use sp_runtime::{
     traits::{DispatchInfoOf, Dispatchable, SignedExtension},
     transaction_validity::{InvalidTransaction, TransactionValidity, TransactionValidityError},
@@ -24,6 +23,26 @@ use sp_runtime::{
 };
 use sp_std::prelude::*;
 use traits::{TraitError, VerifyAccess};
+
+#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub enum Permission {
+    Execute,
+    Manage,
+}
+
+impl Default for Permission {
+    fn default() -> Self {
+        Permission::Execute
+    }
+}
+#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub struct AccessControl {
+    pub pallet: Vec<u8>,
+    pub extrinsic: Vec<u8>,
+    pub permission: Permission,
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -41,7 +60,7 @@ pub mod pallet {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
         /// Origin for adding or removing a access_controls and permissions.
-        type RbacAdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+        type AdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
     #[pallet::pallet]
@@ -49,12 +68,12 @@ pub mod pallet {
     #[pallet::without_storage_info]
     pub struct Pallet<T>(_);
 
-    // The pallet's storage items.
+    /** Admins who manage the assignment of access */
     #[pallet::storage]
-    #[pallet::getter(fn super_admins)]
-    pub type SuperAdmins<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, ()>;
+    #[pallet::getter(fn admins)]
+    pub type Admins<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, ()>;
 
-    // Store access controls for Executing and managing a specific extrinsic on a pallet.
+    /** Store access controls for Executing and managing a specific extrinsic on a pallet. */
     #[pallet::storage]
     #[pallet::getter(fn access_controls)]
     pub type AccessControls<T: Config> =
@@ -62,7 +81,7 @@ pub mod pallet {
 
     #[pallet::genesis_config]
     pub struct GenesisConfig<T: Config> {
-        pub super_admins: Vec<T::AccountId>,
+        pub admins: Vec<T::AccountId>,
         pub access_controls: Vec<(AccessControl, Vec<T::AccountId>)>,
     }
 
@@ -70,7 +89,7 @@ pub mod pallet {
     impl<T: Config> Default for GenesisConfig<T> {
         fn default() -> Self {
             Self {
-                super_admins: Vec::new(),
+                admins: Vec::new(),
                 access_controls: Vec::new(),
             }
         }
@@ -80,8 +99,8 @@ pub mod pallet {
     #[pallet::genesis_build]
     impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
         fn build(&self) {
-            for admin in &self.super_admins {
-                <SuperAdmins<T>>::insert(admin, ());
+            for admin in &self.admins {
+                <Admins<T>>::insert(admin, ());
             }
 
             for access_control in &self.access_controls {
@@ -95,8 +114,8 @@ pub mod pallet {
     pub enum Event<T: Config> {
         AccessRevoked(T::AccountId, Vec<u8>, Vec<u8>),
         AccessGranted(T::AccountId, Vec<u8>, Vec<u8>),
-        SuperAdminAdded(T::AccountId),
-        SuperAdminRevoked(T::AccountId),
+        AdminAdded(T::AccountId),
+        AdminRevoked(T::AccountId),
     }
 
     #[derive(PartialEq)]
@@ -111,23 +130,30 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
+        /** Create Access Control for a specific extrinsic on a pallet.
+            The caller must have permissions to update the c
+            pallet_name: Vec<u8> | "PalletTemplate"
+            pallet_extrinsic: Vec<u8> | "do_something"
+            permission: Permission | `Execute` or `Manage`
+        */
         #[pallet::weight(0)]
         pub fn create_access_control(
             origin: OriginFor<T>,
             pallet_name: Vec<u8>,
-            pallet_function: Vec<u8>,
+            pallet_extrinsic: Vec<u8>,
             permission: Permission,
         ) -> DispatchResult {
-            ensure_signed(origin)?;
+            // Check permissions
+            let signer = ensure_signed(origin.clone())?;
+            ensure!(Admins::<T>::contains_key(&signer), Error::<T>::AccessDenied);
 
             let access_control = AccessControl {
                 pallet: pallet_name,
-                function: pallet_function,
+                extrinsic: pallet_extrinsic,
                 permission,
             };
 
             let accounts: Vec<T::AccountId> = Vec::new();
-
             AccessControls::<T>::insert(access_control, accounts);
 
             Ok(())
@@ -144,13 +170,13 @@ pub mod pallet {
             match Self::verify_manage_access(
                 who,
                 access_control.pallet.clone(),
-                access_control.function.clone(),
+                access_control.extrinsic.clone(),
             ) {
                 Ok(_) => {
                     Self::deposit_event(Event::AccessGranted(
                         account_id.clone(),
                         access_control.pallet.clone().into(),
-                        access_control.function.clone().into(),
+                        access_control.extrinsic.clone().into(),
                     ));
 
                     match AccessControls::<T>::get(access_control.clone()) {
@@ -183,13 +209,13 @@ pub mod pallet {
             match Self::verify_manage_access(
                 who,
                 access_control.pallet.clone(),
-                access_control.function.clone(),
+                access_control.extrinsic.clone(),
             ) {
                 Ok(_) => {
                     Self::deposit_event(Event::AccessRevoked(
                         account_id.clone(),
                         access_control.pallet.clone().into(),
-                        access_control.function.clone().into(),
+                        access_control.extrinsic.clone().into(),
                     ));
 
                     match AccessControls::<T>::get(access_control.clone()) {
@@ -212,15 +238,15 @@ pub mod pallet {
         }
 
         /// Add a new Super Admin.
-        /// Super Admins have access to execute and manage all pallets.
+        /// Admins have access to execute and manage all pallets.
         ///
-        /// Only _root_ can add a Super Admin.
+        /// Only _root_ can add a Admin.
         #[pallet::weight(0)]
         pub fn add_super_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
-            T::RbacAdminOrigin::ensure_origin(origin)?;
+            T::AdminOrigin::ensure_origin(origin)?;
 
-            <SuperAdmins<T>>::insert(&account_id, ());
-            Self::deposit_event(Event::SuperAdminAdded(account_id));
+            <Admins<T>>::insert(&account_id, ());
+            Self::deposit_event(Event::AdminAdded(account_id));
             Ok(())
         }
 
@@ -229,50 +255,29 @@ pub mod pallet {
             origin: OriginFor<T>,
             account_id: T::AccountId,
         ) -> DispatchResult {
-            T::RbacAdminOrigin::ensure_origin(origin)?;
+            T::AdminOrigin::ensure_origin(origin)?;
 
-            <SuperAdmins<T>>::remove(&account_id);
-            Self::deposit_event(Event::SuperAdminRevoked(account_id));
+            <Admins<T>>::remove(&account_id);
+            Self::deposit_event(Event::AdminRevoked(account_id));
             Ok(())
         }
     }
 }
 
-#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
-#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub enum Permission {
-    Execute = 1,
-    Manage = 2,
-}
-
-impl Default for Permission {
-    fn default() -> Self {
-        Permission::Execute
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
-#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub struct AccessControl {
-    pub pallet: Vec<u8>,
-    pub function: Vec<u8>,
-    pub permission: Permission,
-}
-
 impl<T: Config> Pallet<T> {
-    /** Verify that account can execute a function on a pallet.
-     All Pallet functions works as normal when it does not have a access_control created for it.
-     Access is denied when then pallet and function has a access_control, and the account does not have permission to execute
+    /** Verify that account can execute an extrinsic on a pallet.
+     All Pallet extrinsics work as normal when it does not have a access_control created for it.
+     Access is denied when then a pallet and an extrinsic has a access_control, and the account does not have permission to execute.
     */
     pub fn verify_execute_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
-        function: Vec<u8>,
+        extrinsic: Vec<u8>,
         requires_access_control: Option<bool>,
     ) -> Result<(), Error<T>> {
         let access_control = AccessControl {
             pallet,
-            function,
+            extrinsic,
             permission: Permission::Execute,
         };
 
@@ -280,16 +285,16 @@ impl<T: Config> Pallet<T> {
     }
 
     /** Verify the ability to manage the access to a pallets extrinsics.
-     The user must either be an Admin or have the Manage permission for a pallet and function.
+     The user must either be an Admin or have the Manage permission for a pallet and extrinsic.
     */
     pub fn verify_manage_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
-        function: Vec<u8>,
+        extrinsic: Vec<u8>,
     ) -> Result<(), Error<T>> {
         let access_control = AccessControl {
             pallet,
-            function,
+            extrinsic,
             permission: Permission::Manage,
         };
 
@@ -328,9 +333,9 @@ impl<T: Config> VerifyAccess<T::AccountId> for Pallet<T> {
     fn verify_execute_access(
         account_id: T::AccountId,
         pallet: Vec<u8>,
-        function: Vec<u8>,
+        extrinsic: Vec<u8>,
     ) -> Result<(), TraitError> {
-        match Self::verify_execute_access(account_id, pallet, function, Some(true)) {
+        match Self::verify_execute_access(account_id, pallet, extrinsic, Some(true)) {
             Ok(()) => Ok(()),
             Err(_e) => Err(TraitError::AccessDenied),
         }
@@ -341,7 +346,7 @@ impl<T: Config> VerifyAccess<T::AccountId> for Pallet<T> {
 /// for the `Authorize` type.
 /// `SignedExtension` is being used here to filter out the not authorized accounts
 /// when they try to send extrinsics to the runtime.
-/// Inside the `validate` function of the `SignedExtension` trait,
+/// Inside the `validate` extrinsic of the `SignedExtension` trait,
 /// we check if the sender (origin) of the extrinsic has the execute permission or not.
 /// The validation happens at the transaction queue level,
 ///  and the extrinsics are filtered out before they hit the pallet logic.
@@ -393,24 +398,20 @@ where
         _info: &DispatchInfoOf<Self::Call>,
         _len: usize,
     ) -> TransactionValidity {
-        let md = call.get_call_metadata();
-        if <SuperAdmins<T>>::contains_key(who.clone()) {
-            // log::info!("Access Granted!");
+        let call_metadata = call.get_call_metadata();
+        if <Admins<T>>::contains_key(who.clone()) {
             return Ok(Default::default());
         }
 
         match <Pallet<T>>::verify_execute_access(
             who.clone(),
-            md.pallet_name.as_bytes().to_vec(),
-            md.function_name.as_bytes().to_vec(),
+            call_metadata.pallet_name.as_bytes().to_vec(),
+            call_metadata.function_name.as_bytes().to_vec(),
             None,
         ) {
-            Ok(_) => {
-                // log::info!("Access Granted!");
-                Ok(Default::default())
-            }
+            Ok(_) => Ok(Default::default()),
             Err(e) => {
-                log::info!("{:?}! who: {:?}", e, who);
+                log::error!("{:?}! who: {:?}", e, who);
                 Err(InvalidTransaction::Call.into())
             }
         }

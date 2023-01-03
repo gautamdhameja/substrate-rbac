@@ -1,11 +1,10 @@
 [package]
-name = "substrate-rbac"
+name = "access-control"
 version = "0.1.0"
-authors = ["gautamdhameja"]
+authors = ["Dan Henton"]
 edition = "2018"
 license = "Apache-2.0"
-repository = "https://github.com/gautamdhameja/substrate-rbac"
-
+repository = "https://github.com/WunderbarNetwork/access-control"
 
 [dependencies]
 log = { default-features = false, version = "0.4" }
