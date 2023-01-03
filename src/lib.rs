@@ -1,15 +1,17 @@
 //! # Role-based Access Control (RBAC) Pallet
 //!
 //! The RBAC Pallet implements role-based access control and permissions for Substrate extrinsic calls.
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Decode, Encode};
-use frame_support::{traits::GetCallMetadata, weights::DispatchInfo};
+use frame_support::{
+    dispatch::{DispatchInfo, PostDispatchInfo},
+    traits::GetCallMetadata,
+};
 pub use pallet::*;
 use scale_info::TypeInfo;
+// use scale_info::TypeInfo;
 use sp_runtime::{
-    print,
     traits::{DispatchInfoOf, Dispatchable, SignedExtension},
     transaction_validity::{InvalidTransaction, TransactionValidity, TransactionValidityError},
     RuntimeDebug,
@@ -21,18 +23,20 @@ pub mod pallet {
     use super::*;
     use frame_support::{dispatch::DispatchResult, pallet_prelude::*};
     use frame_system::pallet_prelude::*;
+    use sp_std::convert::TryInto;
 
     #[pallet::config]
     pub trait Config: frame_system::Config {
         /// The Event type.
-        type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
         /// Origin for adding or removing a roles and permissions.
-        type RbacAdminOrigin: EnsureOrigin<Self::Origin>;
+        type RbacAdminOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
     #[pallet::pallet]
     #[pallet::generate_store(pub(super) trait Store)]
+    #[pallet::without_storage_info]
     pub struct Pallet<T>(_);
 
     // The pallet's storage items.
@@ -80,6 +84,7 @@ pub mod pallet {
         SuperAdminAdded(T::AccountId),
     }
 
+    #[derive(PartialEq)]
     #[pallet::error]
     pub enum Error<T> {
         AccessDenied,
@@ -178,7 +183,7 @@ impl Default for Permission {
 
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
 pub struct Role {
-    pallet: Vec<u8>,
+    pallet: Vec<u8>, // Update to be a BoundedVec
     permission: Permission,
 }
 
@@ -241,14 +246,19 @@ impl<T: Config + Send + Sync> Authorize<T> {
     pub fn new() -> Self {
         Self(sp_std::marker::PhantomData)
     }
+
+    pub fn do_pre_dispatch(info: DispatchInfo, len: usize) -> Result<(), TransactionValidityError> {
+        Ok(())
+    }
 }
 
 impl<T: Config + Send + Sync> SignedExtension for Authorize<T>
 where
-    T::Call: Dispatchable<Info = DispatchInfo> + GetCallMetadata,
+    T::RuntimeCall:
+        Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo> + GetCallMetadata,
 {
     type AccountId = T::AccountId;
-    type Call = T::Call;
+    type Call = T::RuntimeCall;
     type AdditionalSigned = ();
     type Pre = ();
     const IDENTIFIER: &'static str = "Authorize";
@@ -257,6 +267,7 @@ where
         Ok(())
     }
 
+    /** Used to drop the transaction at the transaction pool level and prevents a transaction from being gossiped */
     fn validate(
         &self,
         who: &Self::AccountId,
@@ -267,17 +278,33 @@ where
         let md = call.get_call_metadata();
 
         if <SuperAdmins<T>>::contains_key(who.clone()) {
-            print("Access Granted!");
+            log::info!("Access Granted!");
             Ok(Default::default())
         } else if <Pallet<T>>::verify_execute_access(
             who.clone(),
             md.pallet_name.as_bytes().to_vec(),
         ) {
-            print("Access Granted!");
+            log::info!("Access Granted!");
             Ok(Default::default())
         } else {
-            print("Access Denied!");
+            log::info!("Access Denied!");
             Err(InvalidTransaction::Call.into())
+        }
+    }
+
+    /** Use to hook in before the transaction runs */
+    fn pre_dispatch(
+        self,
+        who: &Self::AccountId,
+        call: &Self::Call,
+        info: &DispatchInfoOf<Self::Call>,
+        len: usize,
+    ) -> Result<Self::Pre, TransactionValidityError> {
+        log::info!("pre dispatch {:?} {:?} {:?}, {:?}", who, call, info, len);
+
+        match self.validate(who, call, info, len) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 }
