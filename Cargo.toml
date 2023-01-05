@@ -20,6 +20,9 @@ frame-benchmarking = { version = '4.0.0-dev', default-features = false, git = 'h
 frame-support = { version = '4.0.0-dev', default-features = false, git = 'https://github.com/paritytech/substrate.git', branch = "polkadot-v0.9.33" }
 frame-system = { version = '4.0.0-dev', default-features = false, git = 'https://github.com/paritytech/substrate.git', branch = "polkadot-v0.9.33" }
 
+[dev-dependencies]
+test-context = { default-features = false, version = "0.1.4" }
+
 [features]
 default = ['std']
 runtime-benchmarks = ['frame-benchmarking']

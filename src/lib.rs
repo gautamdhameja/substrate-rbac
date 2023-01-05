@@ -6,6 +6,12 @@
 pub use pallet::*;
 pub mod traits;
 
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
 use codec::{Decode, Encode};
 
 #[cfg(feature = "std")]
@@ -145,7 +151,18 @@ pub mod pallet {
         ) -> DispatchResult {
             // Check permissions
             let signer = ensure_signed(origin.clone())?;
-            ensure!(Admins::<T>::contains_key(&signer), Error::<T>::AccessDenied);
+
+            match Self::verify_execute_access(
+                signer,
+                "AccessControl".as_bytes().to_vec(),
+                "create_access_control".as_bytes().to_vec(),
+                Some(true),
+            ) {
+                Ok(()) => {
+                    log::info!("Successfully verified access");
+                }
+                Err(_e) => return Err(Error::<T>::AccessDenied.into()),
+            }
 
             let access_control = AccessControl {
                 pallet: pallet_name,
