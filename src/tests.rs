@@ -3,6 +3,7 @@ use crate::{
     mock::{self, WithAccessControlContext, *},
     Error, Permission,
 };
+use frame_benchmarking::account;
 use frame_support::{assert_noop, assert_ok};
 use test_context::test_context;
 
@@ -14,7 +15,7 @@ fn verify_authorized_execution_of_an_extrinsic(ctx: &mut WithAccessControlContex
 
         assert_ok!(AccessControl::create_access_control(
             signer,
-            "AccessControl".as_bytes().to_vec(),
+            mock::pallet_name(),
             "fake_extrinsic".as_bytes().to_vec(),
             Permission::Execute
         ));
@@ -77,5 +78,51 @@ fn assign_access_control(ctx: &mut WithAccessControlContext) {
             "fake_extrinsic".as_bytes().to_vec(),
             Permission::Execute
         ));
+
+        // ensure that the new account is not a manager
+
+        // ensure that an account with the execution permissions cannot make themselves a manager
     });
+}
+
+#[test_context(WithAccessControlContext)]
+#[test]
+fn revoke_access_for_an_account(ctx: &mut WithAccessControlContext) {
+    new_test_ext(ctx).execute_with(|| {
+        let admin_signer = RuntimeOrigin::signed(*ctx.admins.first().clone().unwrap());
+        let account_to_remove = ctx.admins.first().clone().unwrap();
+        let access_control = access_control::AccessControl {
+            pallet: mock::pallet_name(),
+            extrinsic: mock::create_access_control(),
+            permission: access_control::Permission::Execute,
+        };
+
+        assert_ok!(AccessControl::revoke_access(
+            admin_signer.clone(),
+            *account_to_remove,
+            access_control.clone()
+        ));
+
+        assert_noop!(
+            AccessControl::create_access_control(
+                admin_signer,
+                mock::pallet_name(),
+                "fake_extrinsic".as_bytes().to_vec(),
+                Permission::Execute
+            ),
+            Error::<Test>::AccessDenied
+        );
+    });
+}
+
+#[test_context(WithAccessControlContext)]
+#[test]
+fn add_admin(ctx: &mut WithAccessControlContext) {
+    new_test_ext(ctx).execute_with(|| {});
+}
+
+#[test_context(WithAccessControlContext)]
+#[test]
+fn revoke_admin(ctx: &mut WithAccessControlContext) {
+    new_test_ext(ctx).execute_with(|| {});
 }

@@ -33,8 +33,8 @@ use traits::{TraitError, VerifyAccess};
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum Permission {
-    Execute,
-    Manage,
+    Execute = 0,
+    Manage = 1,
 }
 
 impl Default for Permission {
@@ -142,6 +142,7 @@ pub mod pallet {
             pallet_extrinsic: Vec<u8> | "do_something"
             permission: Permission | `Execute` or `Manage`
         */
+        // TODO: Ensure that a accessor with execution access cannot add themselves as a manager
         #[pallet::weight(0)]
         pub fn create_access_control(
             origin: OriginFor<T>,
@@ -159,9 +160,15 @@ pub mod pallet {
                 Some(true),
             ) {
                 Ok(()) => {
+                    #[cfg(test)]
+                    println!("signer was verified");
                     log::info!("Successfully verified access");
                 }
-                Err(_e) => return Err(Error::<T>::AccessDenied.into()),
+                Err(_e) => {
+                    #[cfg(test)]
+                    println!("signer was denied");
+                    return Err(Error::<T>::AccessDenied.into());
+                }
             }
 
             let access_control = AccessControl {
@@ -237,15 +244,14 @@ pub mod pallet {
 
                     match AccessControls::<T>::get(access_control.clone()) {
                         Some(mut accounts) => {
-                            log::info!("Accounts: {:?}", accounts);
                             accounts.retain(|stored_account| stored_account != &account_id);
+                            AccessControls::<T>::insert(access_control.clone(), accounts);
+                            return Ok(());
                         }
                         None => {
                             return Err(Error::<T>::AccessControlNotFound.into());
                         }
                     }
-
-                    return Ok(());
                 }
                 Err(e) => {
                     log::error!("revoke access_control failed: {:?}", e);
@@ -259,7 +265,7 @@ pub mod pallet {
         ///
         /// Only _root_ can add a Admin.
         #[pallet::weight(0)]
-        pub fn add_super_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
+        pub fn add_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
             T::AdminOrigin::ensure_origin(origin)?;
 
             <Admins<T>>::insert(&account_id, ());
@@ -268,10 +274,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(0)]
-        pub fn revoke_super_admin(
-            origin: OriginFor<T>,
-            account_id: T::AccountId,
-        ) -> DispatchResult {
+        pub fn revoke_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
             T::AdminOrigin::ensure_origin(origin)?;
 
             <Admins<T>>::remove(&account_id);
