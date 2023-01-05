@@ -8,7 +8,7 @@ use sp_runtime::{
 };
 use sp_std::convert::{TryFrom, TryInto};
 use system::EnsureRoot;
-use test_context::TestContext;
+use test_context::{futures::sink::With, TestContext};
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -88,11 +88,22 @@ impl TestContext for WithAccessControlContext {
     }
 }
 
+impl WithAccessControlContext {
+    pub fn admin_signer(self: &Self) -> RuntimeOrigin {
+        RuntimeOrigin::signed(*self.admins.first().clone().unwrap())
+    }
+}
+
 pub fn pallet_name() -> Vec<u8> {
     "AccessControl".as_bytes().to_vec()
 }
+
 pub fn create_access_control() -> Vec<u8> {
     "create_access_control".as_bytes().to_vec()
+}
+
+pub fn fake_extrinsic() -> Vec<u8> {
+    "fake_extrinsic".as_bytes().to_vec()
 }
 
 pub fn new_account() -> sp_core::sr25519::Public {

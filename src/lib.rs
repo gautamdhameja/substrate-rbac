@@ -12,6 +12,9 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
 use codec::{Decode, Encode};
 
 #[cfg(feature = "std")]
@@ -143,7 +146,7 @@ pub mod pallet {
             permission: Permission | `Execute` or `Manage`
         */
         // TODO: Ensure that a accessor with execution access cannot add themselves as a manager
-        #[pallet::weight(0)]
+        #[pallet::weight(10_000_000)]
         pub fn create_access_control(
             origin: OriginFor<T>,
             pallet_name: Vec<u8>,
@@ -183,7 +186,7 @@ pub mod pallet {
             Ok(())
         }
 
-        #[pallet::weight(0)]
+        #[pallet::weight(10_000_000)]
         pub fn assign_access_control(
             origin: OriginFor<T>,
             account_id: T::AccountId,
@@ -222,7 +225,7 @@ pub mod pallet {
             }
         }
 
-        #[pallet::weight(0)]
+        #[pallet::weight(10_000_000)]
         pub fn revoke_access(
             origin: OriginFor<T>,
             account_id: T::AccountId,
@@ -264,7 +267,7 @@ pub mod pallet {
         /// Admins have access to execute and manage all pallets.
         ///
         /// Only _root_ can add a Admin.
-        #[pallet::weight(0)]
+        #[pallet::weight(10_000_000)]
         pub fn add_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
             T::AdminOrigin::ensure_origin(origin)?;
 
@@ -273,7 +276,7 @@ pub mod pallet {
             Ok(())
         }
 
-        #[pallet::weight(0)]
+        #[pallet::weight(10_000_000)]
         pub fn revoke_admin(origin: OriginFor<T>, account_id: T::AccountId) -> DispatchResult {
             T::AdminOrigin::ensure_origin(origin)?;
 

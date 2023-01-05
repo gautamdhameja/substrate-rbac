@@ -3,7 +3,7 @@ use crate::{
     mock::{self, WithAccessControlContext, *},
     Error, Permission,
 };
-use frame_benchmarking::account;
+use frame_support::error::BadOrigin;
 use frame_support::{assert_noop, assert_ok};
 use test_context::test_context;
 
@@ -11,12 +11,10 @@ use test_context::test_context;
 #[test]
 fn verify_authorized_execution_of_an_extrinsic(ctx: &mut WithAccessControlContext) {
     new_test_ext(ctx).execute_with(|| {
-        let signer = RuntimeOrigin::signed(*ctx.admins.first().clone().unwrap());
-
         assert_ok!(AccessControl::create_access_control(
-            signer,
+            ctx.admin_signer(),
             mock::pallet_name(),
-            "fake_extrinsic".as_bytes().to_vec(),
+            mock::fake_extrinsic(),
             Permission::Execute
         ));
     });
@@ -33,7 +31,7 @@ fn deny_extrinsic_execution_access(ctx: &mut WithAccessControlContext) {
             AccessControl::create_access_control(
                 signer,
                 mock::pallet_name(),
-                "fake_extrinsic".as_bytes().to_vec(),
+                mock::fake_extrinsic(),
                 Permission::Execute
             ),
             Error::<Test>::AccessDenied
@@ -46,7 +44,6 @@ fn deny_extrinsic_execution_access(ctx: &mut WithAccessControlContext) {
 fn assign_access_control(ctx: &mut WithAccessControlContext) {
     new_test_ext(ctx).execute_with(|| {
         let account_to_add = mock::new_account();
-        let admin_signer = RuntimeOrigin::signed(*ctx.admins.first().clone().unwrap());
         let unauthorized_signer = RuntimeOrigin::signed(account_to_add);
 
         // The new Account is denied access
@@ -54,7 +51,7 @@ fn assign_access_control(ctx: &mut WithAccessControlContext) {
             AccessControl::create_access_control(
                 unauthorized_signer,
                 mock::pallet_name(),
-                "fake_extrinsic".as_bytes().to_vec(),
+                mock::fake_extrinsic(),
                 Permission::Execute
             ),
             Error::<Test>::AccessDenied
@@ -62,7 +59,7 @@ fn assign_access_control(ctx: &mut WithAccessControlContext) {
 
         // Add the new account to the admins who can create access controls
         assert_ok!(AccessControl::assign_access_control(
-            admin_signer,
+            ctx.admin_signer(),
             account_to_add,
             access_control::AccessControl {
                 pallet: mock::pallet_name(),
@@ -75,7 +72,7 @@ fn assign_access_control(ctx: &mut WithAccessControlContext) {
         assert_ok!(AccessControl::create_access_control(
             RuntimeOrigin::signed(account_to_add),
             mock::pallet_name(),
-            "fake_extrinsic".as_bytes().to_vec(),
+            mock::fake_extrinsic(),
             Permission::Execute
         ));
 
@@ -89,7 +86,6 @@ fn assign_access_control(ctx: &mut WithAccessControlContext) {
 #[test]
 fn revoke_access_for_an_account(ctx: &mut WithAccessControlContext) {
     new_test_ext(ctx).execute_with(|| {
-        let admin_signer = RuntimeOrigin::signed(*ctx.admins.first().clone().unwrap());
         let account_to_remove = ctx.admins.first().clone().unwrap();
         let access_control = access_control::AccessControl {
             pallet: mock::pallet_name(),
@@ -98,16 +94,16 @@ fn revoke_access_for_an_account(ctx: &mut WithAccessControlContext) {
         };
 
         assert_ok!(AccessControl::revoke_access(
-            admin_signer.clone(),
+            ctx.admin_signer(),
             *account_to_remove,
             access_control.clone()
         ));
 
         assert_noop!(
             AccessControl::create_access_control(
-                admin_signer,
+                ctx.admin_signer(),
                 mock::pallet_name(),
-                "fake_extrinsic".as_bytes().to_vec(),
+                mock::fake_extrinsic(),
                 Permission::Execute
             ),
             Error::<Test>::AccessDenied
@@ -118,11 +114,54 @@ fn revoke_access_for_an_account(ctx: &mut WithAccessControlContext) {
 #[test_context(WithAccessControlContext)]
 #[test]
 fn add_admin(ctx: &mut WithAccessControlContext) {
-    new_test_ext(ctx).execute_with(|| {});
+    new_test_ext(ctx).execute_with(|| {
+        let account_to_add = mock::new_account();
+
+        assert_ok!(AccessControl::add_admin(
+            RuntimeOrigin::root(),
+            account_to_add.clone()
+        ));
+
+        assert_eq!(AccessControl::admins(account_to_add), Some(()));
+    });
+}
+
+#[test_context(WithAccessControlContext)]
+#[test]
+fn add_admin_is_root_only(ctx: &mut WithAccessControlContext) {
+    new_test_ext(ctx).execute_with(|| {
+        let account_to_add = mock::new_account();
+
+        assert_noop!(
+            AccessControl::add_admin(ctx.admin_signer(), account_to_add.clone()),
+            BadOrigin
+        );
+    });
 }
 
 #[test_context(WithAccessControlContext)]
 #[test]
 fn revoke_admin(ctx: &mut WithAccessControlContext) {
-    new_test_ext(ctx).execute_with(|| {});
+    new_test_ext(ctx).execute_with(|| {
+        let account_to_remove = ctx.admins.first().unwrap();
+
+        assert_ok!(AccessControl::revoke_admin(
+            RuntimeOrigin::root(),
+            account_to_remove.clone()
+        ));
+
+        assert_eq!(AccessControl::admins(account_to_remove), None)
+    });
+}
+#[test_context(WithAccessControlContext)]
+#[test]
+fn revoke_admin_is_root_only(ctx: &mut WithAccessControlContext) {
+    new_test_ext(ctx).execute_with(|| {
+        let account_to_remove = ctx.admins.first().unwrap();
+
+        assert_noop!(
+            AccessControl::revoke_admin(ctx.admin_signer(), account_to_remove.clone()),
+            BadOrigin
+        );
+    });
 }
