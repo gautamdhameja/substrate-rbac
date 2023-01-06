@@ -75,7 +75,7 @@ impl TestContext for WithAccessControlContext {
         let manage_access_control = access_control::AccessControl {
             pallet: pallet_name(),
             extrinsic: create_access_control(),
-            permission: access_control::Permission::Execute,
+            permission: access_control::Permission::Manage,
         };
 
         WithAccessControlContext {

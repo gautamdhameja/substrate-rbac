@@ -16,6 +16,7 @@ mod tests;
 mod benchmarking;
 
 use codec::{Decode, Encode};
+use frame_system::{ensure_signed, pallet_prelude::OriginFor};
 
 #[cfg(feature = "std")]
 use frame_support::serde::{Deserialize, Serialize};
@@ -153,24 +154,25 @@ pub mod pallet {
             pallet_extrinsic: Vec<u8>,
             permission: Permission,
         ) -> DispatchResult {
-            // Check permissions
-            let signer = ensure_signed(origin.clone())?;
+            // Check Authorization
+            match T::AdminOrigin::ensure_origin(origin.clone()) {
+                Ok(_) => {}
+                Err(_) => {
+                    let signer = ensure_signed(origin.clone())?;
 
-            match Self::verify_execute_access(
-                signer,
-                "AccessControl".as_bytes().to_vec(),
-                "create_access_control".as_bytes().to_vec(),
-                Some(true),
-            ) {
-                Ok(()) => {
-                    #[cfg(test)]
-                    println!("signer was verified");
-                    log::info!("Successfully verified access");
-                }
-                Err(_e) => {
-                    #[cfg(test)]
-                    println!("signer was denied");
-                    return Err(Error::<T>::AccessDenied.into());
+                    match Self::verify_execute_access(
+                        signer,
+                        "AccessControl".as_bytes().to_vec(),
+                        "create_access_control".as_bytes().to_vec(),
+                        Some(true),
+                    ) {
+                        Ok(()) => {
+                            log::info!("Successfully verified access");
+                        }
+                        Err(_e) => {
+                            return Err(Error::<T>::AccessDenied.into());
+                        }
+                    }
                 }
             }
 
@@ -192,37 +194,41 @@ pub mod pallet {
             account_id: T::AccountId,
             access_control: AccessControl,
         ) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+            // Check Authorization
+            match T::AdminOrigin::ensure_origin(origin.clone()) {
+                Ok(_) => {}
+                Err(_) => {
+                    let signer = ensure_signed(origin)?;
 
-            match Self::verify_manage_access(
-                who,
-                access_control.pallet.clone(),
-                access_control.extrinsic.clone(),
-            ) {
-                Ok(_) => {
-                    Self::deposit_event(Event::AccessGranted(
-                        account_id.clone(),
-                        access_control.pallet.clone().into(),
-                        access_control.extrinsic.clone().into(),
-                    ));
-
-                    match AccessControls::<T>::get(access_control.clone()) {
-                        Some(mut accounts) => {
-                            log::info!("Accounts: {:?}", accounts);
-                            accounts.push(account_id.clone());
-                            AccessControls::<T>::insert(access_control.clone(), accounts);
+                    match Self::verify_manage_access(
+                        signer,
+                        access_control.pallet.clone(),
+                        access_control.extrinsic.clone(),
+                    ) {
+                        Ok(_) => {}
+                        Err(_e) => {
+                            return Err(Error::<T>::AccessDenied.into());
                         }
-                        None => return Err(Error::<T>::AccessControlNotFound.into()),
                     }
-
-                    return Ok(());
-                }
-                Err(e) => {
-                    log::error!("assign access_control failed: {:?}", e);
-
-                    return Err(e.into());
                 }
             }
+
+            Self::deposit_event(Event::AccessGranted(
+                account_id.clone(),
+                access_control.pallet.clone().into(),
+                access_control.extrinsic.clone().into(),
+            ));
+
+            match AccessControls::<T>::get(access_control.clone()) {
+                Some(mut accounts) => {
+                    log::info!("Accounts: {:?}", accounts);
+                    accounts.push(account_id.clone());
+                    AccessControls::<T>::insert(access_control.clone(), accounts);
+                }
+                None => return Err(Error::<T>::AccessControlNotFound.into()),
+            }
+
+            return Ok(());
         }
 
         #[pallet::weight(10_000_000)]
@@ -231,34 +237,39 @@ pub mod pallet {
             account_id: T::AccountId,
             access_control: AccessControl,
         ) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+            // Check Authorization
+            match T::AdminOrigin::ensure_origin(origin.clone()) {
+                Ok(_) => {}
+                Err(_) => {
+                    let signer = ensure_signed(origin)?;
 
-            match Self::verify_manage_access(
-                who,
-                access_control.pallet.clone(),
-                access_control.extrinsic.clone(),
-            ) {
-                Ok(_) => {
-                    Self::deposit_event(Event::AccessRevoked(
-                        account_id.clone(),
-                        access_control.pallet.clone().into(),
-                        access_control.extrinsic.clone().into(),
-                    ));
-
-                    match AccessControls::<T>::get(access_control.clone()) {
-                        Some(mut accounts) => {
-                            accounts.retain(|stored_account| stored_account != &account_id);
-                            AccessControls::<T>::insert(access_control.clone(), accounts);
-                            return Ok(());
-                        }
-                        None => {
-                            return Err(Error::<T>::AccessControlNotFound.into());
+                    match Self::verify_manage_access(
+                        signer,
+                        access_control.pallet.clone(),
+                        access_control.extrinsic.clone(),
+                    ) {
+                        Ok(_) => {}
+                        Err(_e) => {
+                            return Err(Error::<T>::AccessDenied.into());
                         }
                     }
                 }
-                Err(e) => {
-                    log::error!("revoke access_control failed: {:?}", e);
-                    return Err(e.into());
+            }
+
+            Self::deposit_event(Event::AccessRevoked(
+                account_id.clone(),
+                access_control.pallet.clone().into(),
+                access_control.extrinsic.clone().into(),
+            ));
+
+            match AccessControls::<T>::get(access_control.clone()) {
+                Some(mut accounts) => {
+                    accounts.retain(|stored_account| stored_account != &account_id);
+                    AccessControls::<T>::insert(access_control.clone(), accounts);
+                    return Ok(());
+                }
+                None => {
+                    return Err(Error::<T>::AccessControlNotFound.into());
                 }
             }
         }
@@ -311,7 +322,7 @@ impl<T: Config> Pallet<T> {
      The user must either be an Admin or have the Manage permission for a pallet and extrinsic.
     */
     pub fn verify_manage_access(
-        account_id: T::AccountId,
+        signer: T::AccountId,
         pallet: Vec<u8>,
         extrinsic: Vec<u8>,
     ) -> Result<(), Error<T>> {
@@ -321,18 +332,18 @@ impl<T: Config> Pallet<T> {
             permission: Permission::Manage,
         };
 
-        Self::verify_access(account_id, access_control, None)
+        Self::verify_access(signer, access_control, Some(true))
     }
 
     /** Private helper method for access authentication */
     fn verify_access(
-        account_id: T::AccountId,
+        signer: T::AccountId,
         access_control: AccessControl,
         requires_access_control: Option<bool>,
     ) -> Result<(), Error<T>> {
         match <AccessControls<T>>::get(&access_control) {
             Some(accounts) => {
-                if accounts.contains(&account_id) {
+                if accounts.contains(&signer) {
                     return Ok(());
                 } else {
                     return Err(Error::<T>::AccessDenied.into());
