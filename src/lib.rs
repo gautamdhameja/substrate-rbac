@@ -46,6 +46,7 @@ impl Default for Permission {
         Permission::Execute
     }
 }
+
 #[derive(PartialEq, Eq, Clone, RuntimeDebug, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct AccessControl {
@@ -145,8 +146,9 @@ pub mod pallet {
             pallet_name: Vec<u8> | "PalletTemplate"
             pallet_extrinsic: Vec<u8> | "do_something"
             permission: Permission | `Execute` or `Manage`
+
+            When the Manage permission has not been created, only an sudo can add execution accounts
         */
-        // TODO: Ensure that a accessor with execution access cannot add themselves as a manager
         #[pallet::weight(10_000_000)]
         pub fn create_access_control(
             origin: OriginFor<T>,
