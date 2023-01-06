@@ -66,12 +66,17 @@ pub struct WithAccessControlContext {
 
 impl TestContext for WithAccessControlContext {
     fn setup() -> Self {
+        // Create a admin account that is not root.
         let admin_account = new_account();
+
+        // Seed AccessControls for executing the extrinsic `create_access_control`.
         let execute_access_control = access_control::AccessControl {
             pallet: pallet_name(),
             extrinsic: create_access_control(),
             permission: access_control::Permission::Execute,
         };
+
+        // Seed AccessControls for managing the extrinsic `create_access_control`.
         let manage_access_control = access_control::AccessControl {
             pallet: pallet_name(),
             extrinsic: create_access_control(),
