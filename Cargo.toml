@@ -1,19 +1,16 @@
 [package]
-name = "substrate-rbac"
+name = "access-control"
 version = "0.1.0"
-authors = ["gautamdhameja"]
+authors = ["Dan Henton"]
 edition = "2018"
 license = "Apache-2.0"
-repository = "https://github.com/gautamdhameja/substrate-rbac"
-
-[dev-dependencies.serde]
-features = ['derive']
-version = '1.0.148'
+repository = "https://github.com/WunderbarNetwork/access-control"
 
 [dependencies]
 log = { default-features = false, version = "0.4" }
 scale-info = { version = '2.3.0', default-features = false, features = ['derive'] }
 codec = { version = '3.2.1', default-features = false, features = ['derive'], package = 'parity-scale-codec' }
+serde =  { version = "1.0.130" }
 
 sp-core = { version = '6.0.0', default-features = false, git = 'https://github.com/paritytech/substrate.git', branch = "polkadot-v0.9.33" }
 sp-io = { version = '6.0.0', default-features = false, git = 'https://github.com/paritytech/substrate.git', branch = "polkadot-v0.9.33" }
@@ -22,6 +19,9 @@ sp-std = { version = '4.0.0', default-features = false, git = 'https://github.co
 frame-benchmarking = { version = '4.0.0-dev', default-features = false, git = 'https://github.com/paritytech/substrate.git', optional = true, branch = "polkadot-v0.9.33" }
 frame-support = { version = '4.0.0-dev', default-features = false, git = 'https://github.com/paritytech/substrate.git', branch = "polkadot-v0.9.33" }
 frame-system = { version = '4.0.0-dev', default-features = false, git = 'https://github.com/paritytech/substrate.git', branch = "polkadot-v0.9.33" }
+
+[dev-dependencies]
+test-context = { default-features = false, version = "0.1.4" }
 
 [features]
 default = ['std']
@@ -36,5 +36,6 @@ std = [
     'sp-io/std',
     'sp-std/std',
     'sp-runtime/std',
+    'serde/std',
 ]
 try-runtime = ['frame-support/try-runtime']
