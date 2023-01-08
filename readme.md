@@ -4,6 +4,9 @@ Fork from [substrate-rbac](https://github.com/gautamdhameja/substrate-rbac)
 A [Substrate](https://github.com/paritytech/substrate) pallet implementing access controls and permissions for Substrate extrinsic calls.
 
 The filtering of incoming extrinsics and their sender accounts is done at the transaction queue validation layer, using the `SignedExtension` trait.
+Extrinsics operate with substrates default behavior if they do not have access controls enabled.
+
+Introduce the `VerifyAccess` type into the config of your custom pallets and call the `verify_execution_access` function to ensure a specific extrinsic has access controls by default.
 
 ## Usage
 
@@ -112,6 +115,51 @@ fn testnet_genesis(...) -> GenesisConfig {
         /// ...
         access_control: AccessControlConfig { admins: authorized_accounts.clone() , access_controls }
     }
+}
+```
+
+### Access Control for custom pallets
+* Add access_control to your custom pallets Cargo.toml
+* Followed by implementing your access control logic
+
+```rust
+use access_control::traits::VerifyAccess;
+
+// ...
+
+#[pallet::config]
+pub trait Config: frame_system::Config + CreateSignedTransaction<Call<Self>> {
+    // ...
+
+    // Add VerifyAccess trait to the pallet.
+    type VerifyAccess: VerifyAccess<Self::AccountId>;
+}
+
+
+
+#[pallet:weight(0)]
+fn do_something(origin: OriginFor<T>) -> DispatchResult {
+    // 1. Ensure that the extrinsic was signed.
+    let signer = ensure_signed(origin);
+
+    // 2. ensure that the signer has authentication access and access control was setup.
+    //   - If the access_control was configured correctly the the SignedExtension will reject the transaction before it was added to the transaction pool,
+    ///    however adding this additional check ensures that in the case of the access control not been setup correctly the extrinsic will fail.
+    //   - This also serves as development documentation that this extrinsic is meant to have AccessControl at the transaction pool level.
+    match T::VerifyAccess::verify_execute_access(
+		signer,
+		"MyCustomPallet".as_bytes().to_vec(),
+		"do_something".as_bytes().to_vec(),
+	) {
+		Ok(_) => {
+			info!("Successfully verified access")
+            // Additional logic
+		},
+            // Return an Error
+			Err(_e) => return Err(frame_support::error::BadOrigin.into()),
+		}
+
+    // custom pallet logic ...
 }
 ```
 
