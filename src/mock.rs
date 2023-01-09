@@ -8,7 +8,7 @@ use sp_runtime::{
 };
 use sp_std::convert::{TryFrom, TryInto};
 use system::EnsureRoot;
-use test_context::{futures::sink::With, TestContext};
+use test_context::TestContext;
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;

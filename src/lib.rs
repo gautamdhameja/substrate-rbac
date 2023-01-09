@@ -141,14 +141,13 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /** Create Access Control for a specific extrinsic on a pallet.
-            The caller must have permissions to update the c
-            pallet_name: Vec<u8> | "PalletTemplate"
-            pallet_extrinsic: Vec<u8> | "do_something"
-            permission: Permission | `Execute` or `Manage`
-
-            When the Manage permission has not been created, only an sudo can add execution accounts
-        */
+        /// Create Access Control for a specific extrinsic on a pallet.
+        ///     The caller must have permissions to update the c
+        ///     pallet_name: Vec<u8> | "PalletTemplate"
+        ///     pallet_extrinsic: Vec<u8> | "do_something"
+        ///     permission: Permission | `Execute` or `Manage`
+        ///
+        ///   When the Manage permission has not been created, only an sudo can add execution accounts
         #[pallet::weight(10_000_000)]
         pub fn create_access_control(
             origin: OriginFor<T>,
